@@ -1,0 +1,11 @@
+{
+	"contracts":
+	[
+		{
+			"address":"0x24302f327764f94c15d930f5Ac70D362B4a156F9",
+			"layout_file_path":"storage_layout.json",
+			"name":["bool1","string1"],
+			"layout":""
+		}
+	]
+}
