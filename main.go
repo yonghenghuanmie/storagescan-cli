@@ -22,10 +22,8 @@ import (
 var rpc_node = "https://ropsten.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161"
 
 const (
-	NameSquarePattern uint8 = iota
-	NameDotPattern
-	DotBeginPattern
-	SquareBeginPattern
+	NamePattern uint8 = iota
+	BeginPattern
 )
 
 type Resolver struct {
@@ -34,28 +32,25 @@ type Resolver struct {
 
 func ResolverConstructor() *Resolver {
 	return &Resolver{[]*regexp.Regexp{
-		regexp.MustCompile(`(.+)(\[.+\].*)`),
-		regexp.MustCompile(`(.+)(\..+)`),
-		regexp.MustCompile(`\.(.+)([\.|\[]?.*)`),
-		regexp.MustCompile(`\[(.+)\]([\.|\[]?.*)`)}}
+		regexp.MustCompile(`(.+?)([\.|\[].+)`),
+		regexp.MustCompile(`\.([^\.\[]+)(.*)|\[(.+?)\](.*)`),
+	}}
 }
 
 func (this *Resolver) GetValueName(s string) (value_name, substring string) {
-	if match_string := this.set[NameSquarePattern].FindStringSubmatch(s); match_string != nil {
-		return match_string[1], match_string[2]
-	}
-	if match_string := this.set[NameDotPattern].FindStringSubmatch(s); match_string != nil {
+	if match_string := this.set[NamePattern].FindStringSubmatch(s); match_string != nil {
 		return match_string[1], match_string[2]
 	}
 	return s, ""
 }
 
 func (this *Resolver) GetFirstParameter(s string) (parameter, substring string) {
-	if match_string := this.set[DotBeginPattern].FindStringSubmatch(s); match_string != nil {
-		return match_string[1], match_string[2]
-	}
-	if match_string := this.set[SquareBeginPattern].FindStringSubmatch(s); match_string != nil {
-		return match_string[1], match_string[2]
+	if match_string := this.set[BeginPattern].FindStringSubmatch(s); match_string != nil {
+		if match_string[1] == "" {
+			return match_string[3], match_string[4]
+		} else {
+			return match_string[1], match_string[2]
+		}
 	}
 	return "", s
 }
@@ -150,38 +145,40 @@ func RunList(cmd *cobra.Command, args []string) {
 			value := contract.GetVariableValue(value_name)
 
 			if substring != "" {
-				v := contract.Variables[value_name]
 				for {
-					if substring == "" {
-						break
-					}
-
 					var parameter string
 					var index uint64
-					if v.Typ() == storagescan.StructTy {
+					switch interface_ := value.(type) {
+					case storagescan.StructValueI:
 						parameter, substring = resolver.GetFirstParameter(substring)
-						value = value.(storagescan.StructValueI).Field(parameter)
-						continue
-					} else if v.Typ() == storagescan.ArrayTy || v.Typ() == storagescan.SliceTy {
+						value = interface_.Field(parameter)
+
+					case storagescan.SliceArrayValueI:
 						parameter, substring = resolver.GetFirstParameter(substring)
 						index, err = strconv.ParseUint(parameter, 10, 64)
 						if err != nil {
 							fmt.Println("Parse index went wrong. " + err.Error())
-							break
+							goto failed
 						}
-						value = value.(storagescan.SliceArrayValueI).Index(index)
-						continue
-					} else if v.Typ() == storagescan.MappingTy {
+						value = interface_.Index(index)
+
+					case storagescan.MappingValueI:
 						parameter, substring = resolver.GetFirstParameter(substring)
-						value = value.(storagescan.MappingValueI).Key(parameter)
-						continue
-					} else {
-						fmt.Println("Input format error. " + query_array.Name[j])
-						break
+						value = interface_.Key(parameter)
+
+					default:
+						if substring == "" {
+							goto success
+						} else {
+							fmt.Println("Input format error. " + query_array.Name[j])
+							goto failed
+						}
 					}
 				}
 			}
+		success:
 			fmt.Printf("%v:%v\n", query_array.Name[j], value)
+		failed:
 		}
 	}
 }
