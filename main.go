@@ -157,7 +157,7 @@ func RunList(cmd *cobra.Command, args []string) {
 						parameter, substring = resolver.GetFirstParameter(substring)
 						index, err = strconv.ParseUint(parameter, 10, 64)
 						if err != nil {
-							fmt.Println("Parse index went wrong. " + err.Error())
+							fmt.Println("Parse index went wrong. " + query_array.Name[j])
 							goto failed
 						}
 						value = interface_.Index(index)
