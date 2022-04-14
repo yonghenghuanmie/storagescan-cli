@@ -10,12 +10,55 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/spf13/cobra"
 	"github.com/yonghenghuanmie/storagescan"
 )
+
+var rpc_node = "https://ropsten.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161"
+
+const (
+	NameSquarePattern uint8 = iota
+	NameDotPattern
+	DotBeginPattern
+	SquareBeginPattern
+)
+
+type Resolver struct {
+	set []*regexp.Regexp
+}
+
+func ResolverConstructor() *Resolver {
+	return &Resolver{[]*regexp.Regexp{
+		regexp.MustCompile(`(.+)(\[.+\].*)`),
+		regexp.MustCompile(`(.+)(\..+)`),
+		regexp.MustCompile(`\.(.+)([\.|\[]?.*)`),
+		regexp.MustCompile(`\[(.+)\]([\.|\[]?.*)`)}}
+}
+
+func (this *Resolver) GetValueName(s string) (value_name, substring string) {
+	if match_string := this.set[NameSquarePattern].FindStringSubmatch(s); match_string != nil {
+		return match_string[1], match_string[2]
+	}
+	if match_string := this.set[NameDotPattern].FindStringSubmatch(s); match_string != nil {
+		return match_string[1], match_string[2]
+	}
+	return s, ""
+}
+
+func (this *Resolver) GetFirstParameter(s string) (parameter, substring string) {
+	if match_string := this.set[DotBeginPattern].FindStringSubmatch(s); match_string != nil {
+		return match_string[1], match_string[2]
+	}
+	if match_string := this.set[SquareBeginPattern].FindStringSubmatch(s); match_string != nil {
+		return match_string[1], match_string[2]
+	}
+	return "", s
+}
 
 type QueryData struct {
 	Address          string   `json:"address"`
@@ -27,29 +70,123 @@ type QueryArray struct {
 	Contracts []QueryData `json:"contracts"`
 }
 
-func main() {
-	rpc_node := "https://ropsten.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161"
-	reference_rpc_node := &rpc_node
-	var file_name string
-	reference_file_name := &file_name
-	query_array := QueryArray{}
-	reference_query_array := &query_array
+var file_name string
+var query_array = QueryArray{}
+var resolver Resolver = *ResolverConstructor()
 
-	ReadJsonData := func(file_name string, json_object any) error {
-		data, err := ioutil.ReadFile(file_name)
-		if err != nil {
-			return errors.New("Failed to open file:" + file_name)
-		}
-		if !json.Valid(data) {
-			return errors.New("Invalid json file:" + file_name)
-		}
-		err = json.Unmarshal(data, json_object)
-		if err != nil {
-			return errors.New("Json unmarshal failed. File:" + file_name)
-		}
-		return nil
+func ReadJsonData(file_name string, json_object any) error {
+	data, err := ioutil.ReadFile(file_name)
+	if err != nil {
+		return errors.New("Failed to open file:" + file_name)
+	}
+	if !json.Valid(data) {
+		return errors.New("Invalid json file:" + file_name)
+	}
+	err = json.Unmarshal(data, json_object)
+	if err != nil {
+		return errors.New("Json unmarshal failed. File:" + file_name)
+	}
+	return nil
+}
+
+func CheckListArgument(cmd *cobra.Command, args []string) error {
+	//check parameter number
+	if len(file_name) == 0 && len(args) < 3 {
+		return errors.New("Not enough parameter, at least 3 parameters or 1 file path.")
 	}
 
+	//construct query data
+	if len(file_name) != 0 {
+		err := ReadJsonData(file_name, &query_array)
+		if err != nil {
+			return err
+		}
+	}
+	if len(args) != 0 && len(args) >= 3 {
+		query_array.Contracts = append(query_array.Contracts, QueryData{args[0], args[1], args[2:], ""})
+	}
+
+	for i := 0; i < len(query_array.Contracts); i++ {
+		query_data := query_array.Contracts[i]
+		//check data format
+		if strings.Compare(query_data.Address[0:2], "0x") != 0 {
+			return errors.New("Only support hex format.")
+		}
+		if len(query_data.Address) != 42 {
+			return errors.New("Not valid hex data.")
+		}
+
+		//fill layout data if layout_file_path is specified
+		if len(query_data.Layout_file_path) != 0 {
+			layout_data, err := ioutil.ReadFile(query_data.Layout_file_path)
+			if err != nil {
+				return errors.New("Failed to open file:" + file_name)
+			}
+			if !json.Valid(layout_data) {
+				return errors.New("Invalid json file:" + file_name)
+			}
+			query_array.Contracts[i].Layout = string(layout_data)
+		}
+	}
+	return nil
+}
+
+func RunList(cmd *cobra.Command, args []string) {
+	for i := 0; i < len(query_array.Contracts); i++ {
+		query_array := query_array.Contracts[i]
+		contract := storagescan.NewContract(common.HexToAddress(query_array.Address), rpc_node)
+		err := contract.ParseByStorageLayout(query_array.Layout)
+		if err != nil {
+			fmt.Println("Parse contract went wrong. " + err.Error())
+			return
+		}
+
+		for j := 0; j < len(query_array.Name); j++ {
+			value_name, substring := resolver.GetValueName(query_array.Name[j])
+			if _, ok := contract.Variables[value_name]; !ok {
+				fmt.Printf("Do not find any value use this name, please check your input or layout file. %v\n", query_array.Name[j])
+				continue
+			}
+			value := contract.GetVariableValue(value_name)
+
+			if substring != "" {
+				v := contract.Variables[value_name]
+				for {
+					if substring == "" {
+						break
+					}
+
+					var parameter string
+					var index uint64
+					if v.Typ() == storagescan.StructTy {
+						parameter, substring = resolver.GetFirstParameter(substring)
+						value = value.(storagescan.StructValueI).Field(parameter)
+						continue
+					} else if v.Typ() == storagescan.ArrayTy || v.Typ() == storagescan.SliceTy {
+						parameter, substring = resolver.GetFirstParameter(substring)
+						index, err = strconv.ParseUint(parameter, 10, 64)
+						if err != nil {
+							fmt.Println("Parse index went wrong. " + err.Error())
+							break
+						}
+						value = value.(storagescan.SliceArrayValueI).Index(index)
+						continue
+					} else if v.Typ() == storagescan.MappingTy {
+						parameter, substring = resolver.GetFirstParameter(substring)
+						value = value.(storagescan.MappingValueI).Key(parameter)
+						continue
+					} else {
+						fmt.Println("Input format error. " + query_array.Name[j])
+						break
+					}
+				}
+			}
+			fmt.Printf("%v:%v\n", query_array.Name[j], value)
+		}
+	}
+}
+
+func main() {
 	//command ls
 	var cmd_ls = &cobra.Command{
 		Use:   "ls [<contract Address> <json file> <variable Name [...]>]",
@@ -62,62 +199,8 @@ func main() {
 				{"Address":"0x2","Layout_file_path":"layout2.json","Name":["c","d"],"Layout":"{...}"}
 			]
 	}`,
-		Args: func(cmd *cobra.Command, args []string) error {
-			//check parameter number
-			if len(*reference_file_name) == 0 && len(args) < 3 {
-				return errors.New("Not enough parameter, at least 3 parameters or 1 file path.")
-			}
-
-			//construct query data
-			if len(*reference_file_name) != 0 {
-				err := ReadJsonData(*reference_file_name, reference_query_array)
-				if err != nil {
-					return err
-				}
-			}
-			if len(args) != 0 {
-				(*reference_query_array).Contracts = append((*reference_query_array).Contracts, QueryData{args[0], args[1], args[2:], ""})
-			}
-
-			for i := 0; i < len((*reference_query_array).Contracts); i++ {
-				query_array := (*reference_query_array).Contracts[i]
-				//check data format
-				if strings.Compare(query_array.Address[0:2], "0x") != 0 {
-					return errors.New("Only support hex format.")
-				}
-				if len(query_array.Address) != 42 {
-					return errors.New("Not valid hex data.")
-				}
-
-				//fill layout data if layout_file_path is specified
-				if len(query_array.Layout_file_path) != 0 {
-					layout_data, err := ioutil.ReadFile(query_array.Layout_file_path)
-					if err != nil {
-						return errors.New("Failed to open file:" + file_name)
-					}
-					if !json.Valid(layout_data) {
-						return errors.New("Invalid json file:" + file_name)
-					}
-					(*reference_query_array).Contracts[i].Layout = string(layout_data)
-				}
-			}
-			return nil
-		},
-		Run: func(cmd *cobra.Command, args []string) {
-			for i := 0; i < len((*reference_query_array).Contracts); i++ {
-				query_array := (*reference_query_array).Contracts[i]
-				contract := storagescan.NewContract(common.HexToAddress(query_array.Address), *reference_rpc_node)
-				err := contract.ParseByStorageLayout(query_array.Layout)
-				if err != nil {
-					fmt.Println("Parse went wrong. " + err.Error())
-					return
-				}
-
-				for j := 0; j < len(query_array.Name); j++ {
-					fmt.Printf("%v:%v\n", query_array.Name[j], contract.GetVariableValue(query_array.Name[j]))
-				}
-			}
-		},
+		Args: CheckListArgument,
+		Run:  RunList,
 	}
 	cmd_ls.Flags().StringVarP(&file_name, "file", "f", "", "Specify list file path.")
 
@@ -135,7 +218,7 @@ func main() {
 			return errors.New("Command not found. command:" + args[0])
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			*reference_rpc_node = args[1]
+			rpc_node = args[1]
 		},
 	}
 
@@ -153,7 +236,7 @@ func main() {
 			return errors.New("Command not found. command:" + args[0])
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("rpc node:" + *reference_rpc_node)
+			fmt.Println("rpc node:" + rpc_node)
 		},
 	}
 
