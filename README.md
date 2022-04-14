@@ -7,6 +7,7 @@ A tool for read data(include private data) from blockchain(theoretically any blo
 4. Use `go build -o storagescan-cli.exe` to generate executable file.
 ## Usage
 `storagescan-cli ls 0x24302f327764f94c15d930f5Ac70D362B4a156F9 storage_layout.json int1 string1`  
+`storagescan-cli ls 0x24302f327764f94c15d930f5Ac70D362B4a156F9 storage_layout.json slice[1] mapping[1] i.id`  
 `storagescan-cli ls query_data.json`  
 `storagescan-cli get rpc`  
 `storagescan-cli set rpc https://ropsten.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161`  
