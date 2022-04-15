@@ -9,7 +9,7 @@ A tool for read data(include private data) from blockchain(theoretically any blo
 1. Deploy contracts to blockchain.  
 2. Generate storage_layout json strings by solc compiler.    
 `solc --storage-layout storage_scan_examples.sol`
-3. Using deployed contracts address and generated storage layout file and variable name as parameter.
+3. Using deployed contracts address and generated storage layout file and variable names as parameter.
 ## Example
 `storagescan-cli ls 0x24302f327764f94c15d930f5Ac70D362B4a156F9 storage_layout.json int1 string1`  
 `storagescan-cli ls 0x24302f327764f94c15d930f5Ac70D362B4a156F9 storage_layout.json slice[1] mapping[1] i.id`  
