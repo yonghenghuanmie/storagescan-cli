@@ -1,4 +1,4 @@
-module main
+module github.com/yonghenghuanmie/main
 
 go 1.18
 
