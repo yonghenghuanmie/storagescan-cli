@@ -11,7 +11,7 @@ A tool for read data(include private data) from blockchain(theoretically any blo
 `solc --storage-layout storage_scan_examples.sol`
 3. Using deployed contracts address and generated storage layout file and variable names as parameter.
 ## Example
-example contract: https://github.com/MetaplasiaTeam/storagescan/blob/main/README.md
+example contract: https://github.com/MetaplasiaTeam/storagescan/blob/main/README.md  
 `storagescan-cli ls 0x24302f327764f94c15d930f5Ac70D362B4a156F9 storage_layout.json int1 string1`  
 `storagescan-cli ls 0x24302f327764f94c15d930f5Ac70D362B4a156F9 storage_layout.json slice[1] mapping[1] i.id`  
 `storagescan-cli ls 0x24302f327764f94c15d930f5Ac70D362B4a156F9 storage_layout.json array5[0].id`  
